@@ -1,4 +1,4 @@
-<!-- 진료비 내역서(사진/PDF)를 여러 무료 AI(GPT-4o·Mistral OCR·OCR.space·Tesseract 자동 전환, 키 불필요)로 인식해 표준 양식 엑셀로 변환하는 단일 파일 웹앱 -->
+<!-- 진료비 내역서(사진/PDF)를 무료 OCR(OCR.space→오프라인 Tesseract 자동 전환, 키 불필요)로 인식해 표준 양식 엑셀로 변환하는 단일 파일 웹앱 -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -7,7 +7,6 @@
 <title>진료비 내역서 변환기</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-<script src="https://js.puter.com/v2/"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; background: #f5f6f8; color: #222; }
@@ -38,7 +37,7 @@
 </head>
 <body>
 <h1>🏥 진료비 내역서 변환기</h1>
-<p class="hint">병원 영수증·진료비 내역 사진(JPG/PNG) 또는 PDF를 업로드하면 무료 AI가 내용을 인식해 실손보험 청구용 엑셀 파일로 변환합니다. 가입·API 키·비용이 필요 없습니다. 여러 무료 AI(GPT-4o → Mistral OCR → OCR.space → 브라우저 내장 Tesseract)를 자동으로 전환하며, 하나가 사용량 한도에 걸려도 다음 AI로 넘어가고 마지막 단계는 오프라인이라 항상 동작합니다. 인식을 위해 이미지가 해당 AI 서버로 전송됩니다(마지막 Tesseract는 전송 없이 내 브라우저에서 처리). 처음엔 Puter 이용 동의 창이 한 번 뜹니다(무료).</p>
+<p class="hint">병원 영수증·진료비 내역 사진(JPG/PNG) 또는 PDF를 업로드하면 무료 OCR(문자인식)이 내용을 읽어 실손보험 청구용 엑셀 파일로 변환합니다. 가입·API 키·비용이 필요 없습니다. 기본은 OCR.space를 쓰고, 한도·오류 시 브라우저 내장 Tesseract(오프라인)로 자동 전환되어 항상 동작합니다. OCR 특성상 표의 금액 항목이 부정확할 수 있으니 결과 표에서 꼭 확인·수정하세요.</p>
 
 <div class="card">
   <h2>1. 파일 업로드</h2>
@@ -145,28 +144,7 @@ async function pdfToDataUrls(file, onPage) {
   return out;
 }
 
-// ===== 무료 AI 인식 (여러 무료 제공자 자동 전환, 키 불필요) =====
-const AI_PROMPT = `이 이미지는 한국 병원의 진료비 계산서·영수증입니다 (국민건강보험 요양급여 표준 서식일 수 있음).
-서식 안내:
-- 진료일은 "진료기간" 칸의 첫 날짜(YYYYMMDD 형태)입니다. 문서 상단·하단의 서식 개정일(예: "개정 2024.7.18")이나 발행일은 진료일이 아니므로 절대 사용하지 마세요.
-- 의료기관 이름은 "상호" 칸의 값입니다 (예: ○○의원, ○○한의원). "진료비 계산서" 같은 문서 제목을 의료기관명으로 쓰지 마세요.
-- "합계" 행의 번호: ①=본인부담금(급여), ②=공단부담금, ③=전액본인부담, ④=비급여
-- ⑥=진료비 총액, ⑪=납부할 금액(환자가 실제 낸 돈, 카드결제액)
-아래 JSON 형식으로만 응답하세요 (설명 없이 JSON만).
-{
- "patient_name": "환자 성명",
- "patient_id": "환자등록번호(차트번호)",
- "hospital_name": "상호(의료기관 명칭)",
- "business_no": "사업자등록번호",
- "address": "사업장 소재지",
- "phone": "전화번호",
- "representative": "대표자 성명",
- "rows": [
-  {"date": "YYYY-MM-DD(진료일)", "total": 진료비총액⑥, "copay": 본인부담금①, "insurer": 공단부담금②, "full_self": 전액본인부담③, "uninsured": 비급여④, "patient_pay": 납부할금액⑪, "note": "특이사항(없으면 빈문자열)"}
- ]
-}
-규칙: 금액은 숫자만(쉼표 제외), 없는 항목은 0 또는 "". 진료일이 여러 날이면 rows에 날짜별로 추가.`;
-
+// ===== 무료 OCR 인식 (OCR.space → 오프라인 Tesseract 자동 전환, 키 불필요) =====
 // --- 개별 무료 제공자들 (키 불필요) ---
 function loadScript(src) {
   return new Promise((res, rej) => {
@@ -177,23 +155,7 @@ function loadScript(src) {
   });
 }
 
-// 1) Puter 비전 LLM — 구조화 JSON 직접 추출 (최고 정확도)
-async function puterVision(model, imageDataUrl) {
-  if (typeof puter === 'undefined' || !puter.ai) throw new Error('Puter 미로드');
-  const r = await puter.ai.chat(AI_PROMPT, imageDataUrl, { model });
-  const out = typeof r === 'string' ? r : (r && r.message && r.message.content) || '';
-  if (!out) throw new Error('빈 응답');
-  return String(out);
-}
-
-// 2) Puter Mistral OCR — 무제한, 텍스트 반환
-async function ocrPuterMistral(imageDataUrl) {
-  const t = await puter.ai.img2txt({ source: imageDataUrl, provider: 'mistral' });
-  if (!t) throw new Error('빈 OCR');
-  return String(t);
-}
-
-// 3) OCR.space — 무키 데모, Puter와 완전 독립
+// 1) OCR.space — 무키 데모, 한국어 OCR (기본)
 async function ocrSpace(imageDataUrl) {
   const fd = new FormData();
   fd.append('base64Image', imageDataUrl);
@@ -206,7 +168,7 @@ async function ocrSpace(imageDataUrl) {
   return String(t);
 }
 
-// 4) Tesseract — 브라우저 내장, 오프라인, 항상 동작 (최종 안전망)
+// 2) Tesseract — 브라우저 내장, 오프라인, 항상 동작 (최종 안전망)
 let _tessWorker = null;
 async function ocrTesseract(imageDataUrl) {
   if (typeof Tesseract === 'undefined') await loadScript('https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js');
@@ -216,21 +178,11 @@ async function ocrTesseract(imageDataUrl) {
   return String(text);
 }
 
-// 전체 폴백 체인: 하나가 한도/실패하면 다음으로 자동 전환
-const VISION_MODELS = ['gpt-4o', 'gpt-4o-mini'];
-const OCR_PROVIDERS = [['Mistral OCR', ocrPuterMistral], ['OCR.space', ocrSpace], ['Tesseract(오프라인)', ocrTesseract]];
+// 폴백 체인: OCR.space 실패 시 오프라인 Tesseract로 자동 전환
+const OCR_PROVIDERS = [['OCR.space', ocrSpace], ['Tesseract(오프라인)', ocrTesseract]];
 
 async function recognizePage(imageDataUrl, onProvider) {
   const errs = [];
-  // 1단계: 비전 LLM (구조화 JSON)
-  for (const m of VISION_MODELS) {
-    try {
-      onProvider && onProvider(m);
-      const p = parseModelOutput(await puterVision(m, imageDataUrl));
-      if (p.rows.length) return { ...p, provider: m };
-    } catch (e) { errs.push(`${m}: ${e.message || e}`); }
-  }
-  // 2단계: OCR 제공자 (텍스트 → 규칙 파서)
   for (const [name, fn] of OCR_PROVIDERS) {
     try {
       onProvider && onProvider(name);
@@ -264,58 +216,97 @@ function parseModelOutput(text) {
 }
 
 // ===== OCR 텍스트 파서 (규칙 기반 — AI가 JSON을 못 만들 때의 대체용) =====
-const num = s => Number(String(s).replace(/[^\d]/g, '')) || 0;
-const lastAmount = line => {
-  const m = line.match(/\d[\d,\.]{2,}/g);           // 3자리 이상 숫자(쉼표 포함)
-  return m ? num(m[m.length - 1]) : 0;              // 금액은 보통 줄 오른쪽 끝
-};
-
-const ROW_FIELDS = [
-  ['patient_pay', /(납부(할|한)?\s*금액|카드\s*(결제)?|수납\s*금액|영수\s*금액|결제\s*금액|받은\s*금액)/],
-  ['full_self',   /전액\s*본인/],
-  ['uninsured',   /비\s*급\s*여/],
-  ['insurer',     /(공단\s*부담|보험자\s*부담)/],
-  ['copay',       /본인\s*부담(금|액)?(?!.*상한)/],
-  ['total',       /(진료비\s*총액|총\s*진료비|진료비\s*합계|요양급여.*총액|총\s*액)/],
-];
-const INFO_FIELDS = [
-  ['patient_name',   /(환자\s*)?성\s*명\s*[:：]?\s*([가-힣]{2,5})/, 2],
-  ['patient_id',     /(등록\s*번호|차트\s*번호)\s*[:：]?\s*([\d\-]{2,})/, 2],
-  ['business_no',    /사업자\s*(등록)?\s*번호\s*[:：]?\s*([\d\-]{10,14})/, 2],
-  ['phone',          /(전화|연락처|TEL)\s*[:：]?\s*(0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4})/i, 2],
-  ['representative', /대\s*표\s*자?\s*[:：]?\s*([가-힣]{2,5})/, 1],
-];
+// OCR은 표를 평면 텍스트로 만들어 라벨과 값이 다른 줄에 오는 경우가 많음 → 창(window) 검색으로 대응
+const HOSPITAL_LEGEND = /^(의원급|병원급|종합병원|상급종합병원|보건기관|보건소)$/;
 
 function parsePage(text) {
   const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const joined = lines.join(' ');
   const info = {}, row = { date: '', total: 0, copay: 0, insurer: 0, full_self: 0, uninsured: 0, patient_pay: 0, note: '' };
+  // 금액은 천단위 콤마가 있는 숫자만 인정 (OCR 잡음·ID·연결숫자 배제), 1천만원 이하만
+  const amtOf = s => {
+    const m = String(s).match(/\d{1,3}(?:,\d{3})+/);
+    if (!m) return null;
+    const v = Number(m[0].replace(/,/g, ''));
+    return v <= 10000000 ? v : null;
+  };
 
-  for (const line of lines) {
-    // 진료일자 (진료기간/발행일보다 진료일 우선)
-    const dm = line.match(/(20\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})/);
-    if (dm && !row.date && !/기간|발행|출력/.test(line)) {
-      row.date = `${dm[1]}-${dm[2].padStart(2,'0')}-${dm[3].padStart(2,'0')}`;
+  // 라벨 줄부터 span줄 이내 첫 금액
+  const nearAmount = (labelRe, span = 4) => {
+    for (let i = 0; i < lines.length; i++) {
+      if (labelRe.test(lines[i])) {
+        const same = amtOf(lines[i]); if (same != null) return same;
+        for (let k = i + 1; k < Math.min(lines.length, i + 1 + span); k++) { const a = amtOf(lines[k]); if (a != null) return a; }
+      }
     }
-    // 금액 항목 (구체적인 키워드 우선 매칭, 항목당 첫 값만)
-    for (const [k, re] of ROW_FIELDS) {
-      if (!row[k] && re.test(line)) { row[k] = lastAmount(line); break; }
+    return null;
+  };
+  // 라벨 줄 또는 다음 span줄에서 값 정규식 매칭
+  const nearText = (labelRe, valRe, span = 2) => {
+    for (let i = 0; i < lines.length; i++) {
+      if (labelRe.test(lines[i])) {
+        const same = lines[i].replace(labelRe, '').match(valRe); if (same) return same[0].trim();
+        for (let k = i + 1; k < Math.min(lines.length, i + 1 + span); k++) { const m = lines[k].match(valRe); if (m) return m[0].trim(); }
+      }
     }
-    // 환자/기관 정보
-    for (const [k, re, g] of INFO_FIELDS) {
-      const m = line.match(re);
-      if (m && !info[k]) info[k] = m[g].trim();
-    }
-    if (!info.hospital_name) {
-      const hm = line.match(/([가-힣\s]{2,15}(병원|의원|한의원|치과|보건소))/);
-      if (hm) info.hospital_name = hm[1].replace(/\s+/g, ' ').trim();
-    }
-    if (!info.address && /([가-힣]+(특별시|광역시|도)\s*[가-힣]+시?[가-힣\s\d,.\-()]+)/.test(line)) {
-      info.address = line.replace(/^(소재지|주소)\s*[:：]?\s*/, '').trim();
+    return null;
+  };
+
+  // 진료일: '진료기간' 근처의 YYYYMMDD (개정/발행/출력 줄 제외)
+  for (let i = 0; i < lines.length; i++) {
+    if (/진료\s*기간/.test(lines[i])) {
+      const seg = lines.slice(i, i + 3).join(' ');
+      const m = seg.match(/(20\d{2})[.\-\/]?\s*(\d{2})[.\-\/]?\s*(\d{2})/);
+      if (m) { row.date = `${m[1]}-${m[2]}-${m[3]}`; break; }
     }
   }
-  // 총액 누락 시 구성요소 합으로 보정
+  if (!row.date) {
+    for (const L of lines) {
+      if (/개정|서식|발행|출력|승인/.test(L)) continue;
+      const m = L.match(/(20\d{2})[.\-\/년]\s*(\d{1,2})[.\-\/월]\s*(\d{1,2})/);
+      if (m) { row.date = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; break; }
+    }
+  }
+
+  // 금액 (금액산정내역·합계 라벨 기준)
+  row.total       = nearAmount(/진료비\s*총액|총\s*진료비|진료비\s*합계/) || 0;
+  row.insurer     = nearAmount(/공단\s*부담/) || 0;
+  row.patient_pay = nearAmount(/납부할\s*금액|납부한\s*금액|환자부담\s*총액/) || 0;
+  row.copay       = nearAmount(/본인\s*부담(금|액)?/) || 0;
+  row.uninsured   = nearAmount(/비\s*급\s*여/) || 0;
+  row.full_self   = nearAmount(/전액\s*본인/) || 0;
+
+  // 정보 필드
+  const BAD_NAME = /^(환자|구분|성명|병실|외래|입원|퇴원|중간|직장|지역|피부양자)$/;
+  const nearName = (labelRe, span = 2) => {
+    for (let i = 0; i < lines.length; i++) {
+      if (labelRe.test(lines[i])) {
+        for (let k = i; k < Math.min(lines.length, i + 1 + span); k++) {
+          const cands = (k === i ? lines[i].replace(labelRe, '') : lines[k]).match(/[가-힣]{2,4}/g) || [];
+          const good = cands.find(c => !BAD_NAME.test(c)); if (good) return good;
+        }
+      }
+    }
+    return null;
+  };
+  const pn = nearName(/환자\s*성\s*명|성\s*명/); if (pn) info.patient_name = pn;
+  const pid = nearText(/등록\s*번호|차트/, /\d{2,}/); if (pid) info.patient_id = pid;
+  const biz = joined.match(/\d{10}(?!\d)/); if (biz) info.business_no = biz[0];
+  const ph = joined.match(/0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4}/); if (ph) info.phone = ph[0].replace(/\s/g, '');
+  const rep = nearName(/대\s*표\s*자/); if (rep) info.representative = rep;
+
+  // 의료기관명: '상호' 우선, 없으면 병원 종류 범례를 제외하고 추출
+  let hosp = nearText(/상\s*호/, /[가-힣]{2,10}(한의원|의원|병원|치과|약국|보건소)/);
+  if (!hosp) {
+    const cands = joined.match(/[가-힣]{2,8}(한의원|의원|병원|치과|약국)/g) || [];
+    hosp = cands.find(c => !HOSPITAL_LEGEND.test(c)) || null;
+  }
+  if (hosp) info.hospital_name = hosp.replace(/\s+/g, ' ').trim();
+
+  const addr = nearText(/소재지|주소/, /[가-힣]+(특별시|광역시|도|시)[가-힣\s\d,.\-()]+/);
+  if (addr) info.address = addr;
+
   if (!row.total) row.total = row.copay + row.insurer + row.full_self + row.uninsured;
-  if (!row.patient_pay) row.patient_pay = row.copay + row.full_self + row.uninsured;
   return { info, row };
 }
 
