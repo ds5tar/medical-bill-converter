@@ -1,10 +1,10 @@
-<!-- 진료비 내역서(사진/PDF)를 무료 OCR(OCR.space→오프라인 Tesseract 자동 전환, 키 불필요)로 인식해 표준 양식 엑셀로 변환하는 단일 파일 웹앱 -->
+<!-- 진료비 내역서(사진/PDF)를 Claude API(사용자 키)로 인식해 표준 양식 색상 엑셀로 변환하는 단일 파일 웹앱 -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>진료비 내역서 변환기</title>
+<title>진료비 내역서 변환기 (Claude AI)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
@@ -12,8 +12,9 @@
   body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; background: #f5f6f8; color: #222; }
   h1 { font-size: 1.5em; } .card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 18px; margin-bottom: 16px; }
   .card h2 { font-size: 1.05em; margin: 0 0 10px; }
-  input[type=text] { padding: 8px; border: 1px solid #ccc; border-radius: 6px; width: 100%; }
+  input[type=text], input[type=password] { padding: 8px; border: 1px solid #ccc; border-radius: 6px; width: 100%; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row > .grow { flex: 1; min-width: 200px; }
   button { padding: 9px 18px; border: none; border-radius: 6px; background: #2563eb; color: #fff; font-size: 0.95em; cursor: pointer; }
   button:disabled { background: #9db4dd; cursor: not-allowed; }
   button.green { background: #16a34a; } button.gray { background: #6b7280; padding: 4px 10px; font-size: 0.85em; }
@@ -33,20 +34,20 @@
   .infoGrid { display: grid; grid-template-columns: 110px 1fr 110px 1fr; gap: 6px; font-size: 0.9em; align-items: center; }
   .infoGrid label { color: #475569; } .infoGrid input { padding: 5px; }
   .hint { font-size: 0.82em; color: #64748b; margin-top: 8px; }
+  a { color: #2563eb; }
 </style>
 </head>
 <body>
-<h1>🏥 진료비 내역서 변환기</h1>
-<p class="hint">병원 영수증·진료비 내역 사진(JPG/PNG) 또는 PDF를 업로드하면 OCR(문자인식)이 내용을 읽어 실손보험 청구용 엑셀 파일로 변환합니다. Azure AI Vision(Microsoft OCR) 키를 입력하면 그걸 먼저 쓰고, 키가 없거나 오류·CORS로 막히면 무료 OCR.space → 브라우저 내장 Tesseract(오프라인)로 자동 전환됩니다. OCR 특성상 표의 금액 항목이 부정확할 수 있으니 결과 표에서 꼭 확인·수정하세요.</p>
+<h1>🏥 진료비 내역서 변환기 <span style="font-size:0.6em;color:#64748b">Claude AI</span></h1>
+<p class="hint">병원 영수증·진료비 내역 사진(JPG/PNG) 또는 PDF를 업로드하면 Claude AI가 내용을 분석해 실손보험 청구용 엑셀 파일로 변환합니다. 양식이 병원마다 달라도 자동으로 항목을 인식합니다. 인식을 위해 이미지가 Anthropic(Claude) 서버로 전송됩니다.</p>
 
 <div class="card">
-  <h2>1. (선택) Azure AI Vision — Microsoft OCR 키</h2>
-  <div class="infoGrid" style="grid-template-columns:110px 1fr">
-    <label>엔드포인트</label><input type="text" id="az_endpoint" placeholder="https://&lt;리소스이름&gt;.cognitiveservices.azure.com">
-    <label>API 키</label><input type="password" id="az_key" placeholder="Azure 포털 > 리소스 > 키 및 엔드포인트">
+  <h2>1. Claude API 키</h2>
+  <div class="row">
+    <div class="grow"><input type="password" id="apiKey" placeholder="sk-ant-..."></div>
+    <label><input type="checkbox" id="saveKey"> 이 브라우저에 저장</label>
   </div>
-  <label style="font-size:0.85em"><input type="checkbox" id="az_save"> 이 브라우저에 저장</label>
-  <p class="hint">Azure 포털에서 "Computer Vision"(AI Vision) 리소스를 만들면 무료 등급(F0, 월 5,000건)으로 키·엔드포인트를 받을 수 있습니다. 비워두면 무료 OCR.space/Tesseract만 사용합니다. 키는 이 브라우저에서 Azure로만 전송되며, 저장 시 localStorage에만 보관됩니다. ⚠ 브라우저에서 Azure를 직접 부르면 CORS로 막힐 수 있고, 그러면 자동으로 무료 OCR로 넘어갑니다.</p>
+  <p class="hint">키는 이 브라우저에서 Anthropic API로만 전송되며 다른 서버로 가지 않습니다. 저장 시 localStorage에만 보관됩니다. 키 발급은 <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a> → API Keys에서 가능하며, 사용료는 키 소유자에게 부과됩니다(30페이지 기준 약 $0.2~0.3).</p>
 </div>
 
 <div class="card">
@@ -61,7 +62,7 @@
   <progress id="prog" value="0" max="100" style="display:none"></progress>
   <div id="status"></div>
   <div id="errors" class="err"></div>
-  <p class="hint">페이지당 인식에 5~15초 정도 소요됩니다. 결과는 표에서 꼭 확인·수정한 뒤 다운로드하세요.</p>
+  <p class="hint">페이지당 인식에 5~15초 정도 소요됩니다. 결과는 표에서 확인·수정한 뒤 다운로드하세요.</p>
 </div>
 
 <div class="card" id="resultCard" style="display:none">
@@ -86,7 +87,7 @@
     <button id="addRowBtn" class="gray">＋ 행 추가</button>
     <button id="downloadBtn" class="green">⬇ 엑셀 다운로드</button>
   </div>
-  <p class="hint">노란 셀은 클릭하여 직접 수정할 수 있습니다. 진료일은 오래된 순으로 자동 정렬되며, 맨 아래 합계 행과 엑셀 합계는 자동 계산됩니다.</p>
+  <p class="hint">노란 셀은 클릭하여 직접 수정할 수 있습니다. 진료일은 오름차순 정렬되며, 맨 아래 합계 행과 엑셀 합계(SUM 수식)는 자동 계산됩니다.</p>
 </div>
 
 <script>
@@ -98,21 +99,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 const $ = id => document.getElementById(id);
 const NUM_KEYS = ['total','copay','insurer','full_self','uninsured','patient_pay'];
 
-// ===== Azure 키 저장/복원 =====
-(function initAzure() {
-  const ep = localStorage.getItem('az_endpoint'), key = localStorage.getItem('az_key');
-  if (ep) $('az_endpoint').value = ep;
-  if (key) { $('az_key').value = key; $('az_save').checked = true; }
-  const save = () => {
-    if ($('az_save').checked) {
-      localStorage.setItem('az_endpoint', $('az_endpoint').value.trim());
-      localStorage.setItem('az_key', $('az_key').value.trim());
-    } else { localStorage.removeItem('az_endpoint'); localStorage.removeItem('az_key'); }
-  };
-  $('az_save').addEventListener('change', save);
-  $('az_endpoint').addEventListener('blur', save);
-  $('az_key').addEventListener('blur', save);
-})();
+// ===== API 키 저장/복원 =====
+if (localStorage.getItem('anthropic_key')) { $('apiKey').value = localStorage.getItem('anthropic_key'); $('saveKey').checked = true; }
+$('saveKey').addEventListener('change', () => { if (!$('saveKey').checked) localStorage.removeItem('anthropic_key'); });
 
 // ===== 파일 업로드 UI =====
 const drop = $('drop');
@@ -134,242 +123,102 @@ function renderFileList() {
   $('analyzeBtn').disabled = files.length === 0;
 }
 
-// ===== 이미지 준비 (리사이즈 + dataURL) =====
-const MAX_DIM = 2200; // 조밀한 진료비 서식을 또렷하게 읽도록 고해상도
+// ===== 이미지 준비 (리사이즈 + base64) =====
+const MAX_DIM = 1568; // Claude 비전 권장 크기
 function scaleDim(w, h) { const s = Math.min(1, MAX_DIM / Math.max(w, h)); return [Math.round(w*s), Math.round(h*s)]; }
+function canvasToB64(c) { return c.toDataURL('image/jpeg', 0.85).split(',')[1]; }
 
-async function imageFileToDataUrl(file) {
-  const img = await new Promise((res, rej) => {
-    const i = new Image();
-    i.onload = () => res(i); i.onerror = rej;
-    i.src = URL.createObjectURL(file);
-  });
+async function imageFileToB64(file) {
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
   const [w, h] = scaleDim(img.naturalWidth, img.naturalHeight);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(img, 0, 0, w, h);
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
   URL.revokeObjectURL(img.src);
-  return c.toDataURL('image/jpeg', 0.85);
+  return canvasToB64(c);
 }
 
-async function pdfToDataUrls(file, onPage) {
+async function pdfToB64List(file, onPage) {
   const data = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   const out = [];
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const vp1 = page.getViewport({ scale: 1 });
-    const scale = Math.min(3, MAX_DIM / Math.max(vp1.width, vp1.height));
+    const scale = Math.min(2.5, MAX_DIM / Math.max(vp1.width, vp1.height));
     const vp = page.getViewport({ scale });
     const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
     await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-    out.push(c.toDataURL('image/jpeg', 0.85));
+    out.push(canvasToB64(c));
     onPage && onPage(p, pdf.numPages);
   }
   return out;
 }
 
-// ===== 무료 OCR 인식 (OCR.space → 오프라인 Tesseract 자동 전환, 키 불필요) =====
-// --- 개별 무료 제공자들 (키 불필요) ---
-function loadScript(src) {
-  return new Promise((res, rej) => {
-    if ([...document.scripts].some(s => s.src === src)) return res();
-    const s = document.createElement('script'); s.src = src;
-    s.onload = res; s.onerror = () => rej(new Error('스크립트 로드 실패: ' + src));
-    document.head.appendChild(s);
-  });
+// ===== Claude API 호출 =====
+const CLAUDE_MODEL = 'claude-sonnet-5';
+const AI_PROMPT = `이 이미지는 한국 병원의 진료비 계산서·영수증입니다 (국민건강보험 요양급여 표준 서식일 수 있음).
+서식 안내:
+- 진료일은 "진료기간" 칸의 첫 날짜입니다. 문서 상단·하단의 서식 개정일(예: "개정 2024.7.18")이나 발행일은 진료일이 아니므로 절대 사용하지 마세요.
+- 의료기관 이름은 "상호" 칸의 값입니다 (예: ○○의원, ○○한의원). "진료비 계산서" 같은 문서 제목을 의료기관명으로 쓰지 마세요.
+- "합계" 행의 번호: ①=본인부담금(급여), ②=공단부담금, ③=전액본인부담, ④=비급여
+- ⑥=진료비 총액, ⑪=납부할 금액(환자가 실제 낸 돈, 카드결제액). 개별 진료항목(진찰료 등)의 금액이 아니라 합계·금액산정내역의 값을 사용하세요.
+아래 JSON 형식으로만 응답하세요 (설명 없이 JSON만).
+{
+ "patient_name": "환자 성명",
+ "patient_id": "환자등록번호(차트번호)",
+ "hospital_name": "상호(의료기관 명칭)",
+ "business_no": "사업자등록번호",
+ "address": "사업장 소재지",
+ "phone": "전화번호",
+ "representative": "대표자 성명",
+ "rows": [
+  {"date": "YYYY-MM-DD(진료일)", "total": 진료비총액, "copay": 본인부담금, "insurer": 공단부담금, "full_self": 전액본인부담, "uninsured": 비급여, "patient_pay": 납부할금액, "note": "특이사항(없으면 빈문자열)"}
+ ]
 }
+규칙: 금액은 숫자만(쉼표 제외), 없는 항목은 0 또는 "". 진료일이 여러 날이면 rows에 날짜별로 추가.`;
 
-// 1) OCR.space — 무키 데모, 한국어 OCR (기본)
-async function ocrSpace(imageDataUrl) {
-  const fd = new FormData();
-  fd.append('base64Image', imageDataUrl);
-  fd.append('language', 'kor'); fd.append('OCREngine', '2'); fd.append('scale', 'true');
-  const r = await fetch('https://api.ocr.space/parse/image', { method: 'POST', headers: { apikey: 'helloworld' }, body: fd });
-  const j = await r.json();
-  if (j.IsErroredOnProcessing) throw new Error([].concat(j.ErrorMessage || '오류').join(' '));
-  const t = j.ParsedResults && j.ParsedResults[0] && j.ParsedResults[0].ParsedText;
-  if (!t) throw new Error('빈 OCR');
-  return String(t);
-}
-
-// 2) Tesseract — 브라우저 내장, 오프라인, 항상 동작 (최종 안전망)
-let _tessWorker = null;
-async function ocrTesseract(imageDataUrl) {
-  if (typeof Tesseract === 'undefined') await loadScript('https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js');
-  if (!_tessWorker) _tessWorker = await Tesseract.createWorker('kor+eng');
-  const { data: { text } } = await _tessWorker.recognize(imageDataUrl);
-  if (!text) throw new Error('빈 OCR');
-  return String(text);
-}
-
-// 0) Azure AI Vision (Microsoft OCR) — 사용자 키/엔드포인트 입력 시 사용
-function dataUrlToBlob(dataUrl) {
-  const [head, b64] = dataUrl.split(',');
-  const mime = (head.match(/:(.*?);/) || [])[1] || 'image/jpeg';
-  const bin = atob(b64);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: mime });
-}
-async function ocrAzure(imageDataUrl) {
-  const endpoint = ($('az_endpoint').value || '').trim().replace(/\/+$/, '');
-  const key = ($('az_key').value || '').trim();
-  if (!endpoint || !key) throw new Error('Azure 키 미입력');
-  const url = `${endpoint}/computervision/imageanalysis:analyze?api-version=2024-02-01&features=read`;
-  const resp = await fetch(url, {
+async function callClaude(apiKey, b64) {
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Ocp-Apim-Subscription-Key': key, 'Content-Type': 'application/octet-stream' },
-    body: dataUrlToBlob(imageDataUrl)
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+        { type: 'text', text: AI_PROMPT }
+      ] }]
+    })
   });
   if (!resp.ok) {
-    const e = await resp.text().catch(() => '');
-    throw new Error(`Azure 오류 ${resp.status} ${e.slice(0, 120)}`);
+    const e = await resp.json().catch(() => ({}));
+    throw new Error(`API 오류 ${resp.status}: ${(e.error && e.error.message) || resp.statusText}`);
   }
-  const j = await resp.json();
-  const blocks = (j.readResult && j.readResult.blocks) || [];
-  const text = blocks.flatMap(b => (b.lines || []).map(l => l.text)).join('\n');
-  if (!text) throw new Error('빈 OCR');
-  return text;
+  const data = await resp.json();
+  const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
+  return parseModelOutput(text);
 }
 
-// 폴백 체인: (Azure 키 있으면 먼저) → OCR.space → 오프라인 Tesseract
-function providerChain() {
-  const chain = [];
-  if (($('az_endpoint').value || '').trim() && ($('az_key').value || '').trim())
-    chain.push(['Azure AI Vision', ocrAzure]);
-  chain.push(['OCR.space', ocrSpace], ['Tesseract(오프라인)', ocrTesseract]);
-  return chain;
-}
-
-async function recognizePage(imageDataUrl, onProvider) {
-  const errs = [];
-  for (const [name, fn] of providerChain()) {
-    try {
-      onProvider && onProvider(name);
-      const p = parseModelOutput(await fn(imageDataUrl));
-      return { ...p, provider: name };
-    } catch (e) { errs.push(`${name}: ${e.message || e}`); }
-  }
-  throw new Error('모든 OCR 실패 — ' + errs.join(' | '));
-}
-
-// AI 응답 → 구조화 (JSON 우선, 실패 시 규칙 기반 파서로 대체)
+// Claude JSON 응답 → 구조화
 function parseModelOutput(text) {
   const m = text.replace(/```json?/gi, '').replace(/```/g, '').match(/\{[\s\S]*\}/);
-  if (m) {
-    try {
-      const j = JSON.parse(m[0]);
-      const info = {};
-      for (const k of ['patient_name','patient_id','hospital_name','business_no','address','phone','representative']) {
-        if (j[k]) info[k] = String(j[k]);
-      }
-      const rows = (Array.isArray(j.rows) ? j.rows : []).map(r => {
-        const row = { date: String(r.date || ''), note: String(r.note || '') };
-        for (const k of NUM_KEYS) row[k] = Number(String(r[k]).replace(/[^\d.-]/g, '')) || 0;
-        return row;
-      });
-      return { info, rows };
-    } catch (e) { /* JSON 파싱 실패 → 규칙 기반으로 */ }
+  if (!m) throw new Error('응답에서 JSON을 찾지 못했습니다.');
+  const j = JSON.parse(m[0]);
+  const info = {};
+  for (const k of ['patient_name','patient_id','hospital_name','business_no','address','phone','representative']) {
+    if (j[k]) info[k] = String(j[k]);
   }
-  const p = parsePage(text);
-  return { info: p.info, rows: [p.row] };
-}
-
-// ===== OCR 텍스트 파서 (규칙 기반 — AI가 JSON을 못 만들 때의 대체용) =====
-// OCR은 표를 평면 텍스트로 만들어 라벨과 값이 다른 줄에 오는 경우가 많음 → 창(window) 검색으로 대응
-const HOSPITAL_LEGEND = /^(의원급|병원급|종합병원|상급종합병원|보건기관|보건소)$/;
-
-function parsePage(text) {
-  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
-  const joined = lines.join(' ');
-  const info = {}, row = { date: '', total: 0, copay: 0, insurer: 0, full_self: 0, uninsured: 0, patient_pay: 0, note: '' };
-  // 금액은 천단위 콤마가 있는 숫자만 인정 (OCR 잡음·ID·연결숫자 배제), 1천만원 이하만
-  const amtOf = s => {
-    const m = String(s).match(/\d{1,3}(?:,\d{3})+/);
-    if (!m) return null;
-    const v = Number(m[0].replace(/,/g, ''));
-    return v <= 10000000 ? v : null;
-  };
-
-  // 라벨 줄부터 span줄 이내 첫 금액
-  const nearAmount = (labelRe, span = 4) => {
-    for (let i = 0; i < lines.length; i++) {
-      if (labelRe.test(lines[i])) {
-        const same = amtOf(lines[i]); if (same != null) return same;
-        for (let k = i + 1; k < Math.min(lines.length, i + 1 + span); k++) { const a = amtOf(lines[k]); if (a != null) return a; }
-      }
-    }
-    return null;
-  };
-  // 라벨 줄 또는 다음 span줄에서 값 정규식 매칭
-  const nearText = (labelRe, valRe, span = 2) => {
-    for (let i = 0; i < lines.length; i++) {
-      if (labelRe.test(lines[i])) {
-        const same = lines[i].replace(labelRe, '').match(valRe); if (same) return same[0].trim();
-        for (let k = i + 1; k < Math.min(lines.length, i + 1 + span); k++) { const m = lines[k].match(valRe); if (m) return m[0].trim(); }
-      }
-    }
-    return null;
-  };
-
-  // 진료일: '진료기간' 근처의 YYYYMMDD (개정/발행/출력 줄 제외)
-  for (let i = 0; i < lines.length; i++) {
-    if (/진료\s*기간/.test(lines[i])) {
-      const seg = lines.slice(i, i + 3).join(' ');
-      const m = seg.match(/(20\d{2})[.\-\/]?\s*(\d{2})[.\-\/]?\s*(\d{2})/);
-      if (m) { row.date = `${m[1]}-${m[2]}-${m[3]}`; break; }
-    }
-  }
-  if (!row.date) {
-    for (const L of lines) {
-      if (/개정|서식|발행|출력|승인/.test(L)) continue;
-      const m = L.match(/(20\d{2})[.\-\/년]\s*(\d{1,2})[.\-\/월]\s*(\d{1,2})/);
-      if (m) { row.date = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`; break; }
-    }
-  }
-
-  // 금액 (금액산정내역·합계 라벨 기준)
-  row.total       = nearAmount(/진료비\s*총액|총\s*진료비|진료비\s*합계/) || 0;
-  row.insurer     = nearAmount(/공단\s*부담/) || 0;
-  row.patient_pay = nearAmount(/납부할\s*금액|납부한\s*금액|환자부담\s*총액/) || 0;
-  row.copay       = nearAmount(/본인\s*부담(금|액)?/) || 0;
-  row.uninsured   = nearAmount(/비\s*급\s*여/) || 0;
-  row.full_self   = nearAmount(/전액\s*본인/) || 0;
-
-  // 정보 필드
-  const BAD_NAME = /^(환자|구분|성명|병실|외래|입원|퇴원|중간|직장|지역|피부양자)$/;
-  const nearName = (labelRe, span = 2) => {
-    for (let i = 0; i < lines.length; i++) {
-      if (labelRe.test(lines[i])) {
-        for (let k = i; k < Math.min(lines.length, i + 1 + span); k++) {
-          const cands = (k === i ? lines[i].replace(labelRe, '') : lines[k]).match(/[가-힣]{2,4}/g) || [];
-          const good = cands.find(c => !BAD_NAME.test(c)); if (good) return good;
-        }
-      }
-    }
-    return null;
-  };
-  const pn = nearName(/환자\s*성\s*명|성\s*명/); if (pn) info.patient_name = pn;
-  const pid = nearText(/등록\s*번호|차트/, /\d{2,}/); if (pid) info.patient_id = pid;
-  const biz = joined.match(/\d{10}(?!\d)/); if (biz) info.business_no = biz[0];
-  const ph = joined.match(/0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4}/); if (ph) info.phone = ph[0].replace(/\s/g, '');
-  const rep = nearName(/대\s*표\s*자/); if (rep) info.representative = rep;
-
-  // 의료기관명: '상호' 우선, 없으면 병원 종류 범례를 제외하고 추출
-  let hosp = nearText(/상\s*호/, /[가-힣]{2,10}(한의원|의원|병원|치과|약국|보건소)/);
-  if (!hosp) {
-    const cands = joined.match(/[가-힣]{2,8}(한의원|의원|병원|치과|약국)/g) || [];
-    hosp = cands.find(c => !HOSPITAL_LEGEND.test(c)) || null;
-  }
-  if (hosp) info.hospital_name = hosp.replace(/\s+/g, ' ').trim();
-
-  const addr = nearText(/소재지|주소/, /[가-힣]+(특별시|광역시|도|시)[가-힣\s\d,.\-()]+/);
-  if (addr) info.address = addr;
-
-  if (!row.total) row.total = row.copay + row.insurer + row.full_self + row.uninsured;
-  return { info, row };
+  const rows = (Array.isArray(j.rows) ? j.rows : []).map(r => {
+    const row = { date: String(r.date || ''), note: String(r.note || '') };
+    for (const k of NUM_KEYS) row[k] = Number(String(r[k]).replace(/[^\d.-]/g, '')) || 0;
+    return row;
+  });
+  return { info, rows };
 }
 
 function mergePages(pages) {
@@ -378,44 +227,50 @@ function mergePages(pages) {
   for (const { info, rows } of pages) {
     for (const k of Object.keys(out)) if (k !== 'rows' && !out[k] && info[k]) out[k] = info[k];
     for (const row of rows) {
-      if (!row.date && !row.total && !row.patient_pay) continue; // 완전 빈 행 제외
+      if (!row.date && !row.total && !row.patient_pay) continue;
       const key = `${row.date}|${row.total}|${row.patient_pay}`;
       if (!seen.has(key)) { seen.add(key); out.rows.push(row); }
     }
   }
-  out.rows.sort((a, b) => a.date.localeCompare(b.date));
+  out.rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return out;
 }
 
 // ===== 인식 파이프라인 =====
 $('analyzeBtn').addEventListener('click', async () => {
+  const apiKey = $('apiKey').value.trim();
+  if (!apiKey) { alert('Claude API 키를 입력하세요.'); return; }
+  if ($('saveKey').checked) localStorage.setItem('anthropic_key', apiKey);
+
   $('analyzeBtn').disabled = true;
   $('errors').textContent = '';
   $('prog').style.display = 'block'; $('prog').value = 0;
   const status = t => $('status').textContent = t;
 
   try {
-    // 1) 모든 파일 → 이미지
+    // 1) 모든 파일 → 이미지 base64
     status('파일을 이미지로 변환 중...');
     const images = [];
     for (const f of files) {
       if (f.type === 'application/pdf') {
-        const pages = await pdfToDataUrls(f, (p, n) => { status(`${f.name}: 페이지 ${p}/${n} 변환 중...`); $('prog').value = (p / n) * 15; });
+        const pages = await pdfToB64List(f, (p, n) => { status(`${f.name}: 페이지 ${p}/${n} 변환 중...`); $('prog').value = (p / n) * 20; });
         images.push(...pages);
       } else {
-        images.push(await imageFileToDataUrl(f));
+        images.push(await imageFileToB64(f));
       }
     }
     if (images.length === 0) throw new Error('변환할 이미지가 없습니다.');
 
-    // 2) 무료 AI 인식 (제공자 자동 전환 체인, 페이지별)
+    // 2) 페이지별 Claude 분석
     const pages = [], failed = [];
     for (let i = 0; i < images.length; i++) {
-      $('prog').value = 15 + ((i + 1) / images.length) * 80;
+      status(`Claude AI 인식 중... (${i + 1}/${images.length} 페이지)`);
+      $('prog').value = 20 + ((i + 1) / images.length) * 75;
       try {
-        pages.push(await recognizePage(images[i], prov => status(`AI 인식 중... (${i + 1}/${images.length} 페이지 · ${prov})`)));
-      } catch (e2) {
-        failed.push(`페이지 ${i + 1}: ${e2.message}`);
+        pages.push(await callClaude(apiKey, images[i]));
+      } catch (e1) {
+        try { pages.push(await callClaude(apiKey, images[i])); } // 1회 재시도
+        catch (e2) { failed.push(`페이지 ${i + 1}: ${e2.message}`); }
       }
     }
     if (pages.length === 0) throw new Error('모든 페이지 인식에 실패했습니다.\n' + failed.join('\n'));
@@ -440,18 +295,12 @@ function computePeriod() {
   if (!dates.length) return '';
   return `${dates[0]} ~ ${dates[dates.length - 1]} (외래 ${extracted.rows.length}회)`;
 }
-
-function sortRows() {
-  extracted.rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
-}
-
+function sortRows() { extracted.rows.sort((a, b) => String(a.date).localeCompare(String(b.date))); }
 function renderFooter() {
   const sums = {}; NUM_KEYS.forEach(k => sums[k] = 0);
   extracted.rows.forEach(r => NUM_KEYS.forEach(k => sums[k] += Number(r[k]) || 0));
   $('rowsTable').querySelector('tfoot').innerHTML =
-    `<tr><td></td><td>합계</td>`
-    + NUM_KEYS.map(k => `<td>${sums[k].toLocaleString()}</td>`).join('')
-    + `<td></td><td></td></tr>`;
+    `<tr><td></td><td>합계</td>` + NUM_KEYS.map(k => `<td>${sums[k].toLocaleString()}</td>`).join('') + `<td></td><td></td></tr>`;
 }
 
 function renderPreview() {
@@ -485,32 +334,21 @@ $('sortBtn').addEventListener('click', () => { sortRows(); renderPreview(); });
 $('addRowBtn').addEventListener('click', () => { extracted.rows.push({ date: '', total: 0, copay: 0, insurer: 0, full_self: 0, uninsured: 0, patient_pay: 0, note: '' }); renderPreview(); });
 
 // ===== 엑셀 생성 (ExcelJS — 예제 파일과 동일한 색·서식) =====
-const CLR = {
-  header: 'FF1F4E78',   // 헤더: 진한 파랑
-  headerText: 'FFFFFFFF',
-  total: 'FFDDEBF7',    // 합계: 연파랑
-  label: 'FFF2F2F2',    // 정보 라벨: 회색
-  border: 'FF999999'    // 테두리: 회색 얇은 선
-};
+const CLR = { header: 'FF1F4E78', headerText: 'FFFFFFFF', total: 'FFDDEBF7', label: 'FFF2F2F2', border: 'FF999999' };
 const thinBorder = () => ({
-  top: { style: 'thin', color: { argb: CLR.border } },
-  left: { style: 'thin', color: { argb: CLR.border } },
-  bottom: { style: 'thin', color: { argb: CLR.border } },
-  right: { style: 'thin', color: { argb: CLR.border } }
+  top: { style: 'thin', color: { argb: CLR.border } }, left: { style: 'thin', color: { argb: CLR.border } },
+  bottom: { style: 'thin', color: { argb: CLR.border } }, right: { style: 'thin', color: { argb: CLR.border } }
 });
 const fillOf = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
 
 $('downloadBtn').addEventListener('click', async () => {
-  sortRows();
-  renderPreview();
+  sortRows(); renderPreview();
   const g = id => $(id).value.trim();
   const rows = extracted.rows;
-
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('진료비내역');
   ws.columns = [{ width: 5 }, { width: 13 }, { width: 15 }, { width: 15 }, { width: 13 }, { width: 13 }, { width: 12 }, { width: 22 }, { width: 26 }];
 
-  // 1행: 제목
   ws.mergeCells('A1:I1');
   const title = ws.getCell('A1');
   title.value = '진료비 내역서 (실손의료보험 청구용)';
@@ -518,7 +356,6 @@ $('downloadBtn').addEventListener('click', async () => {
   title.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(1).height = 24;
 
-  // 3~6행: 환자·기관 정보 (라벨=회색, 값=병합)
   const info = [
     ['환자 성명', g('f_patient_name'), '환자등록번호', g('f_patient_id')],
     ['의료기관', g('f_hospital_name'), '사업자등록번호', g('f_business_no')],
@@ -527,61 +364,47 @@ $('downloadBtn').addEventListener('click', async () => {
   ];
   info.forEach((rowData, idx) => {
     const r = 3 + idx;
-    ws.mergeCells(`B${r}:D${r}`);
-    ws.mergeCells(`F${r}:I${r}`);
-    ws.getCell(`A${r}`).value = rowData[0];
-    ws.getCell(`B${r}`).value = rowData[1];
-    ws.getCell(`E${r}`).value = rowData[2];
-    ws.getCell(`F${r}`).value = rowData[3];
+    ws.mergeCells(`B${r}:D${r}`); ws.mergeCells(`F${r}:I${r}`);
+    ws.getCell(`A${r}`).value = rowData[0]; ws.getCell(`B${r}`).value = rowData[1];
+    ws.getCell(`E${r}`).value = rowData[2]; ws.getCell(`F${r}`).value = rowData[3];
     ['A','B','C','D','E','F','G','H','I'].forEach(c => {
-      const cell = ws.getCell(`${c}${r}`);
-      cell.border = thinBorder();
+      const cell = ws.getCell(`${c}${r}`); cell.border = thinBorder();
       if (c === 'A' || c === 'E') { cell.fill = fillOf(CLR.label); cell.font = { bold: true }; }
     });
   });
 
-  // 8행: 헤더 (진한 파랑 + 흰 글씨)
   const headers = ['No.', '진료일자', '진료비 총액(원)', '본인부담금(급여)', '공단부담금', '전액본인부담', '비급여', '환자부담 총액(카드결제)', '비고'];
   const headerRow = ws.getRow(8);
   headers.forEach((h, i) => {
     const cell = headerRow.getCell(i + 1);
-    cell.value = h;
-    cell.fill = fillOf(CLR.header);
+    cell.value = h; cell.fill = fillOf(CLR.header);
     cell.font = { bold: true, color: { argb: CLR.headerText } };
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
     cell.border = thinBorder();
   });
 
-  // 9행~: 데이터
   const first = 9;
   rows.forEach((r, i) => {
-    const rowNum = first + i;
-    const row = ws.getRow(rowNum);
+    const row = ws.getRow(first + i);
     const vals = [i + 1, r.date, r.total, r.copay, r.insurer, r.full_self, r.uninsured, r.patient_pay, r.note];
     vals.forEach((v, ci) => {
-      const cell = row.getCell(ci + 1);
-      cell.value = v;
-      cell.border = thinBorder();
+      const cell = row.getCell(ci + 1); cell.value = v; cell.border = thinBorder();
       if (ci >= 2 && ci <= 7) { cell.numFmt = '#,##0'; cell.alignment = { horizontal: 'right' }; }
       else if (ci === 0 || ci === 1) cell.alignment = { horizontal: 'center' };
     });
   });
 
-  // 합계 행 (연파랑 + SUM 수식)
   const last = 8 + rows.length, sumRow = last + 1;
   const totalRow = ws.getRow(sumRow);
   totalRow.getCell(2).value = '합계';
   ['C','D','E','F','G','H'].forEach(col => {
     const cell = ws.getCell(`${col}${sumRow}`);
     cell.value = { formula: `SUM(${col}${first}:${col}${last})` };
-    cell.numFmt = '#,##0';
-    cell.alignment = { horizontal: 'right' };
+    cell.numFmt = '#,##0'; cell.alignment = { horizontal: 'right' };
   });
   for (let c = 1; c <= 9; c++) {
     const cell = totalRow.getCell(c);
-    cell.fill = fillOf(CLR.total);
-    cell.font = { bold: true };
-    cell.border = thinBorder();
+    cell.fill = fillOf(CLR.total); cell.font = { bold: true }; cell.border = thinBorder();
   }
 
   const buf = await wb.xlsx.writeBuffer();
