@@ -107,7 +107,7 @@ function renderFileList() {
 }
 
 // ===== 이미지 준비 (리사이즈 + dataURL) =====
-const MAX_DIM = 1600;
+const MAX_DIM = 2200; // 조밀한 진료비 서식을 또렷하게 읽도록 고해상도
 function scaleDim(w, h) { const s = Math.min(1, MAX_DIM / Math.max(w, h)); return [Math.round(w*s), Math.round(h*s)]; }
 
 async function imageFileToDataUrl(file) {
@@ -143,7 +143,7 @@ async function pdfToDataUrls(file, onPage) {
 }
 
 // ===== 무료 AI 인식 (Puter.js — GPT-4o 비전, 키 불필요, 최초 1회 동의) =====
-const AI_MODEL = 'gpt-4o-mini';
+const AI_MODEL = 'gpt-4o';
 const AI_PROMPT = `이 이미지는 한국 병원의 진료비 계산서·영수증입니다 (국민건강보험 요양급여 표준 서식일 수 있음).
 서식 안내:
 - 진료일은 "진료기간" 칸의 첫 날짜(YYYYMMDD 형태)입니다. 문서 상단·하단의 서식 개정일(예: "개정 2024.7.18")이나 발행일은 진료일이 아니므로 절대 사용하지 마세요.
