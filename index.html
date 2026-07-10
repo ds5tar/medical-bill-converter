@@ -37,10 +37,20 @@
 </head>
 <body>
 <h1>🏥 진료비 내역서 변환기</h1>
-<p class="hint">병원 영수증·진료비 내역 사진(JPG/PNG) 또는 PDF를 업로드하면 무료 OCR(문자인식)이 내용을 읽어 실손보험 청구용 엑셀 파일로 변환합니다. 가입·API 키·비용이 필요 없습니다. 기본은 OCR.space를 쓰고, 한도·오류 시 브라우저 내장 Tesseract(오프라인)로 자동 전환되어 항상 동작합니다. OCR 특성상 표의 금액 항목이 부정확할 수 있으니 결과 표에서 꼭 확인·수정하세요.</p>
+<p class="hint">병원 영수증·진료비 내역 사진(JPG/PNG) 또는 PDF를 업로드하면 OCR(문자인식)이 내용을 읽어 실손보험 청구용 엑셀 파일로 변환합니다. Azure AI Vision(Microsoft OCR) 키를 입력하면 그걸 먼저 쓰고, 키가 없거나 오류·CORS로 막히면 무료 OCR.space → 브라우저 내장 Tesseract(오프라인)로 자동 전환됩니다. OCR 특성상 표의 금액 항목이 부정확할 수 있으니 결과 표에서 꼭 확인·수정하세요.</p>
 
 <div class="card">
-  <h2>1. 파일 업로드</h2>
+  <h2>1. (선택) Azure AI Vision — Microsoft OCR 키</h2>
+  <div class="infoGrid" style="grid-template-columns:110px 1fr">
+    <label>엔드포인트</label><input type="text" id="az_endpoint" placeholder="https://&lt;리소스이름&gt;.cognitiveservices.azure.com">
+    <label>API 키</label><input type="password" id="az_key" placeholder="Azure 포털 > 리소스 > 키 및 엔드포인트">
+  </div>
+  <label style="font-size:0.85em"><input type="checkbox" id="az_save"> 이 브라우저에 저장</label>
+  <p class="hint">Azure 포털에서 "Computer Vision"(AI Vision) 리소스를 만들면 무료 등급(F0, 월 5,000건)으로 키·엔드포인트를 받을 수 있습니다. 비워두면 무료 OCR.space/Tesseract만 사용합니다. 키는 이 브라우저에서 Azure로만 전송되며, 저장 시 localStorage에만 보관됩니다. ⚠ 브라우저에서 Azure를 직접 부르면 CORS로 막힐 수 있고, 그러면 자동으로 무료 OCR로 넘어갑니다.</p>
+</div>
+
+<div class="card">
+  <h2>2. 파일 업로드</h2>
   <div id="drop">📄 여기를 클릭하거나 파일을 끌어다 놓으세요 (사진 JPG/PNG 또는 PDF, 여러 개 동시 선택 가능)</div>
   <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,application/pdf" multiple hidden>
   <ul id="fileList"></ul>
@@ -55,7 +65,7 @@
 </div>
 
 <div class="card" id="resultCard" style="display:none">
-  <h2>2. 결과 확인 및 수정</h2>
+  <h2>3. 결과 확인 및 수정</h2>
   <div class="infoGrid">
     <label>환자 성명</label><input id="f_patient_name">
     <label>환자등록번호</label><input id="f_patient_id">
@@ -87,6 +97,22 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 
 const $ = id => document.getElementById(id);
 const NUM_KEYS = ['total','copay','insurer','full_self','uninsured','patient_pay'];
+
+// ===== Azure 키 저장/복원 =====
+(function initAzure() {
+  const ep = localStorage.getItem('az_endpoint'), key = localStorage.getItem('az_key');
+  if (ep) $('az_endpoint').value = ep;
+  if (key) { $('az_key').value = key; $('az_save').checked = true; }
+  const save = () => {
+    if ($('az_save').checked) {
+      localStorage.setItem('az_endpoint', $('az_endpoint').value.trim());
+      localStorage.setItem('az_key', $('az_key').value.trim());
+    } else { localStorage.removeItem('az_endpoint'); localStorage.removeItem('az_key'); }
+  };
+  $('az_save').addEventListener('change', save);
+  $('az_endpoint').addEventListener('blur', save);
+  $('az_key').addEventListener('blur', save);
+})();
 
 // ===== 파일 업로드 UI =====
 const drop = $('drop');
@@ -178,19 +204,55 @@ async function ocrTesseract(imageDataUrl) {
   return String(text);
 }
 
-// 폴백 체인: OCR.space 실패 시 오프라인 Tesseract로 자동 전환
-const OCR_PROVIDERS = [['OCR.space', ocrSpace], ['Tesseract(오프라인)', ocrTesseract]];
+// 0) Azure AI Vision (Microsoft OCR) — 사용자 키/엔드포인트 입력 시 사용
+function dataUrlToBlob(dataUrl) {
+  const [head, b64] = dataUrl.split(',');
+  const mime = (head.match(/:(.*?);/) || [])[1] || 'image/jpeg';
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+async function ocrAzure(imageDataUrl) {
+  const endpoint = ($('az_endpoint').value || '').trim().replace(/\/+$/, '');
+  const key = ($('az_key').value || '').trim();
+  if (!endpoint || !key) throw new Error('Azure 키 미입력');
+  const url = `${endpoint}/computervision/imageanalysis:analyze?api-version=2024-02-01&features=read`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Ocp-Apim-Subscription-Key': key, 'Content-Type': 'application/octet-stream' },
+    body: dataUrlToBlob(imageDataUrl)
+  });
+  if (!resp.ok) {
+    const e = await resp.text().catch(() => '');
+    throw new Error(`Azure 오류 ${resp.status} ${e.slice(0, 120)}`);
+  }
+  const j = await resp.json();
+  const blocks = (j.readResult && j.readResult.blocks) || [];
+  const text = blocks.flatMap(b => (b.lines || []).map(l => l.text)).join('\n');
+  if (!text) throw new Error('빈 OCR');
+  return text;
+}
+
+// 폴백 체인: (Azure 키 있으면 먼저) → OCR.space → 오프라인 Tesseract
+function providerChain() {
+  const chain = [];
+  if (($('az_endpoint').value || '').trim() && ($('az_key').value || '').trim())
+    chain.push(['Azure AI Vision', ocrAzure]);
+  chain.push(['OCR.space', ocrSpace], ['Tesseract(오프라인)', ocrTesseract]);
+  return chain;
+}
 
 async function recognizePage(imageDataUrl, onProvider) {
   const errs = [];
-  for (const [name, fn] of OCR_PROVIDERS) {
+  for (const [name, fn] of providerChain()) {
     try {
       onProvider && onProvider(name);
       const p = parseModelOutput(await fn(imageDataUrl));
       return { ...p, provider: name };
     } catch (e) { errs.push(`${name}: ${e.message || e}`); }
   }
-  throw new Error('모든 무료 AI 실패 — ' + errs.join(' | '));
+  throw new Error('모든 OCR 실패 — ' + errs.join(' | '));
 }
 
 // AI 응답 → 구조화 (JSON 우선, 실패 시 규칙 기반 파서로 대체)
