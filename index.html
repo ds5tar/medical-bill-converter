@@ -1,0 +1,336 @@
+<!-- 진료비 내역서(사진/PDF)를 무료 OCR(Tesseract)로 인식해 표준 양식 엑셀로 변환하는 단일 파일 웹앱 -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>진료비 내역서 변환기</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; background: #f5f6f8; color: #222; }
+  h1 { font-size: 1.5em; } .card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 1.05em; margin: 0 0 10px; }
+  input[type=text] { padding: 8px; border: 1px solid #ccc; border-radius: 6px; width: 100%; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { padding: 9px 18px; border: none; border-radius: 6px; background: #2563eb; color: #fff; font-size: 0.95em; cursor: pointer; }
+  button:disabled { background: #9db4dd; cursor: not-allowed; }
+  button.green { background: #16a34a; } button.gray { background: #6b7280; padding: 4px 10px; font-size: 0.85em; }
+  #drop { border: 2px dashed #94a3b8; border-radius: 10px; padding: 34px; text-align: center; color: #64748b; cursor: pointer; background: #fafbfc; }
+  #drop.over { border-color: #2563eb; background: #eff6ff; }
+  #fileList { margin-top: 10px; font-size: 0.9em; color: #334155; }
+  #fileList li { margin: 2px 0; }
+  progress { width: 100%; height: 14px; }
+  #status { font-size: 0.9em; color: #475569; margin-top: 6px; min-height: 1.2em; }
+  .err { color: #dc2626; font-size: 0.9em; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.85em; margin-top: 8px; }
+  th, td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: right; }
+  th { background: #f1f5f9; text-align: center; }
+  td:first-child, td:nth-child(2), td:last-child { text-align: center; }
+  td[contenteditable] { background: #fffef5; min-width: 60px; }
+  .infoGrid { display: grid; grid-template-columns: 110px 1fr 110px 1fr; gap: 6px; font-size: 0.9em; align-items: center; }
+  .infoGrid label { color: #475569; } .infoGrid input { padding: 5px; }
+  .hint { font-size: 0.82em; color: #64748b; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>🏥 진료비 내역서 변환기</h1>
+<p class="hint">병원 영수증·진료비 내역 사진(JPG/PNG) 또는 PDF를 업로드하면 브라우저 내장 무료 OCR(문자인식)이 내용을 읽어 실손보험 청구용 엑셀 파일로 변환합니다. 모든 처리가 내 컴퓨터 안에서만 이루어지며, 파일이 외부로 전송되지 않고 비용도 들지 않습니다.</p>
+
+<div class="card">
+  <h2>1. 파일 업로드</h2>
+  <div id="drop">📄 여기를 클릭하거나 파일을 끌어다 놓으세요 (사진 JPG/PNG 또는 PDF, 여러 개 동시 선택 가능)</div>
+  <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,application/pdf" multiple hidden>
+  <ul id="fileList"></ul>
+  <div class="row" style="margin-top:10px">
+    <button id="analyzeBtn" disabled>🔍 인식 시작</button>
+    <button id="clearBtn" class="gray">초기화</button>
+  </div>
+  <progress id="prog" value="0" max="100" style="display:none"></progress>
+  <div id="status"></div>
+  <div id="errors" class="err"></div>
+  <p class="hint">처음 실행 시 한국어 인식 데이터를 내려받느라 수십 초 걸릴 수 있습니다. 페이지당 인식에 5~15초 정도 소요됩니다. 무료 문자인식 특성상 흐린 스캔본은 오인식이 있을 수 있으니 결과 표에서 꼭 확인·수정해주세요.</p>
+</div>
+
+<div class="card" id="resultCard" style="display:none">
+  <h2>2. 결과 확인 및 수정</h2>
+  <div class="infoGrid">
+    <label>환자 성명</label><input id="f_patient_name">
+    <label>환자등록번호</label><input id="f_patient_id">
+    <label>의료기관</label><input id="f_hospital_name">
+    <label>사업자등록번호</label><input id="f_business_no">
+    <label>소재지</label><input id="f_address">
+    <label>전화번호</label><input id="f_phone">
+    <label>대표자</label><input id="f_representative">
+    <label>진료기간</label><input id="f_period" placeholder="자동 계산됨">
+  </div>
+  <table id="rowsTable">
+    <thead><tr><th>No.</th><th>진료일자</th><th>진료비 총액</th><th>본인부담(급여)</th><th>공단부담금</th><th>전액본인부담</th><th>비급여</th><th>환자부담 총액</th><th>비고</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div class="row" style="margin-top:10px">
+    <button id="addRowBtn" class="gray">＋ 행 추가</button>
+    <button id="downloadBtn" class="green">⬇ 엑셀 다운로드</button>
+  </div>
+  <p class="hint">노란 셀은 클릭하여 직접 수정할 수 있습니다. 합계는 엑셀에서 SUM 수식으로 자동 계산됩니다.</p>
+</div>
+
+<script>
+// ===== 상태 =====
+let files = [];       // File 객체 목록
+let extracted = null; // {patient_name, ..., rows:[...]}
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const $ = id => document.getElementById(id);
+const NUM_KEYS = ['total','copay','insurer','full_self','uninsured','patient_pay'];
+
+// ===== 파일 업로드 UI =====
+const drop = $('drop');
+drop.addEventListener('click', () => $('fileInput').click());
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); addFiles(e.dataTransfer.files); });
+$('fileInput').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+$('clearBtn').addEventListener('click', () => { files = []; renderFileList(); $('errors').textContent = ''; $('status').textContent = ''; $('resultCard').style.display = 'none'; });
+
+function addFiles(list) {
+  for (const f of list) {
+    if (/^image\/(jpeg|png|webp)$/.test(f.type) || f.type === 'application/pdf') files.push(f);
+  }
+  renderFileList();
+}
+function renderFileList() {
+  $('fileList').innerHTML = files.map(f => `<li>${f.name} (${(f.size/1024/1024).toFixed(1)}MB)</li>`).join('');
+  $('analyzeBtn').disabled = files.length === 0;
+}
+
+// ===== 이미지 준비 (리사이즈 + dataURL) =====
+const MAX_DIM = 2200; // OCR은 해상도가 높을수록 정확
+function scaleDim(w, h) { const s = Math.min(1, MAX_DIM / Math.max(w, h)); return [Math.round(w*s), Math.round(h*s)]; }
+
+async function imageFileToDataUrl(file) {
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i); i.onerror = rej;
+    i.src = URL.createObjectURL(file);
+  });
+  const [w, h] = scaleDim(img.naturalWidth, img.naturalHeight);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(img, 0, 0, w, h);
+  URL.revokeObjectURL(img.src);
+  return c.toDataURL('image/png');
+}
+
+async function pdfToDataUrls(file, onPage) {
+  const data = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const out = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const vp1 = page.getViewport({ scale: 1 });
+    const scale = Math.min(3, MAX_DIM / Math.max(vp1.width, vp1.height));
+    const vp = page.getViewport({ scale });
+    const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+    await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    out.push(c.toDataURL('image/png'));
+    onPage && onPage(p, pdf.numPages);
+  }
+  return out;
+}
+
+// ===== OCR 텍스트 파서 (규칙 기반) =====
+const num = s => Number(String(s).replace(/[^\d]/g, '')) || 0;
+const lastAmount = line => {
+  const m = line.match(/\d[\d,\.]{2,}/g);           // 3자리 이상 숫자(쉼표 포함)
+  return m ? num(m[m.length - 1]) : 0;              // 금액은 보통 줄 오른쪽 끝
+};
+
+const ROW_FIELDS = [
+  ['patient_pay', /(납부(할|한)?\s*금액|카드\s*(결제)?|수납\s*금액|영수\s*금액|결제\s*금액|받은\s*금액)/],
+  ['full_self',   /전액\s*본인/],
+  ['uninsured',   /비\s*급\s*여/],
+  ['insurer',     /(공단\s*부담|보험자\s*부담)/],
+  ['copay',       /본인\s*부담(금|액)?(?!.*상한)/],
+  ['total',       /(진료비\s*총액|총\s*진료비|진료비\s*합계|요양급여.*총액|총\s*액)/],
+];
+const INFO_FIELDS = [
+  ['patient_name',   /(환자\s*)?성\s*명\s*[:：]?\s*([가-힣]{2,5})/, 2],
+  ['patient_id',     /(등록\s*번호|차트\s*번호)\s*[:：]?\s*([\d\-]{2,})/, 2],
+  ['business_no',    /사업자\s*(등록)?\s*번호\s*[:：]?\s*([\d\-]{10,14})/, 2],
+  ['phone',          /(전화|연락처|TEL)\s*[:：]?\s*(0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4})/i, 2],
+  ['representative', /대\s*표\s*자?\s*[:：]?\s*([가-힣]{2,5})/, 1],
+];
+
+function parsePage(text) {
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const info = {}, row = { date: '', total: 0, copay: 0, insurer: 0, full_self: 0, uninsured: 0, patient_pay: 0, note: '' };
+
+  for (const line of lines) {
+    // 진료일자 (진료기간/발행일보다 진료일 우선)
+    const dm = line.match(/(20\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})/);
+    if (dm && !row.date && !/기간|발행|출력/.test(line)) {
+      row.date = `${dm[1]}-${dm[2].padStart(2,'0')}-${dm[3].padStart(2,'0')}`;
+    }
+    // 금액 항목 (구체적인 키워드 우선 매칭, 항목당 첫 값만)
+    for (const [k, re] of ROW_FIELDS) {
+      if (!row[k] && re.test(line)) { row[k] = lastAmount(line); break; }
+    }
+    // 환자/기관 정보
+    for (const [k, re, g] of INFO_FIELDS) {
+      const m = line.match(re);
+      if (m && !info[k]) info[k] = m[g].trim();
+    }
+    if (!info.hospital_name) {
+      const hm = line.match(/([가-힣\s]{2,15}(병원|의원|한의원|치과|보건소))/);
+      if (hm) info.hospital_name = hm[1].replace(/\s+/g, ' ').trim();
+    }
+    if (!info.address && /([가-힣]+(특별시|광역시|도)\s*[가-힣]+시?[가-힣\s\d,.\-()]+)/.test(line)) {
+      info.address = line.replace(/^(소재지|주소)\s*[:：]?\s*/, '').trim();
+    }
+  }
+  // 총액 누락 시 구성요소 합으로 보정
+  if (!row.total) row.total = row.copay + row.insurer + row.full_self + row.uninsured;
+  if (!row.patient_pay) row.patient_pay = row.copay + row.full_self + row.uninsured;
+  return { info, row };
+}
+
+function mergePages(pages) {
+  const out = { patient_name:'', patient_id:'', hospital_name:'', business_no:'', address:'', phone:'', representative:'', rows: [] };
+  const seen = new Set();
+  for (const { info, row } of pages) {
+    for (const k of Object.keys(out)) if (k !== 'rows' && !out[k] && info[k]) out[k] = info[k];
+    if (row.date || row.total || row.patient_pay) {   // 완전 빈 페이지 제외
+      const key = `${row.date}|${row.total}|${row.patient_pay}`;
+      if (!seen.has(key)) { seen.add(key); out.rows.push(row); }
+    }
+  }
+  out.rows.sort((a, b) => a.date.localeCompare(b.date));
+  return out;
+}
+
+// ===== 인식 파이프라인 =====
+$('analyzeBtn').addEventListener('click', async () => {
+  $('analyzeBtn').disabled = true;
+  $('errors').textContent = '';
+  $('prog').style.display = 'block'; $('prog').value = 0;
+  const status = t => $('status').textContent = t;
+  let worker = null;
+
+  try {
+    // 1) 모든 파일 → 이미지
+    status('파일을 이미지로 변환 중...');
+    const images = [];
+    for (const f of files) {
+      if (f.type === 'application/pdf') {
+        const pages = await pdfToDataUrls(f, (p, n) => { status(`${f.name}: 페이지 ${p}/${n} 변환 중...`); $('prog').value = (p / n) * 15; });
+        images.push(...pages);
+      } else {
+        images.push(await imageFileToDataUrl(f));
+      }
+    }
+    if (images.length === 0) throw new Error('변환할 이미지가 없습니다.');
+
+    // 2) OCR (한국어+영어, 최초 1회 언어데이터 다운로드)
+    status('문자인식 엔진 준비 중... (처음이면 데이터 다운로드로 수십 초 소요)');
+    worker = await Tesseract.createWorker('kor+eng');
+    const pages = [], failed = [];
+    for (let i = 0; i < images.length; i++) {
+      status(`문자인식 중... (${i + 1}/${images.length} 페이지)`);
+      $('prog').value = 15 + ((i + 1) / images.length) * 80;
+      try {
+        const { data: { text } } = await worker.recognize(images[i]);
+        pages.push(parsePage(text));
+      } catch (e) {
+        failed.push(`페이지 ${i + 1}: ${e.message}`);
+      }
+    }
+    if (pages.length === 0) throw new Error('모든 페이지 인식에 실패했습니다.\n' + failed.join('\n'));
+    if (failed.length) $('errors').textContent = '⚠ 일부 페이지 인식 실패 (수동 입력 필요)\n' + failed.join('\n');
+
+    // 3) 병합 + 미리보기
+    extracted = mergePages(pages);
+    $('prog').value = 100;
+    status(`완료 — 진료 내역 ${extracted.rows.length}건 인식됨 (표에서 확인·수정하세요)`);
+    renderPreview();
+  } catch (e) {
+    $('errors').textContent = e.message;
+    status('실패');
+  } finally {
+    if (worker) await worker.terminate();
+    $('analyzeBtn').disabled = false;
+  }
+});
+
+// ===== 미리보기 =====
+function computePeriod() {
+  const dates = extracted.rows.map(r => r.date).filter(Boolean).sort();
+  if (!dates.length) return '';
+  return `${dates[0]} ~ ${dates[dates.length - 1]} (외래 ${extracted.rows.length}회)`;
+}
+
+function renderPreview() {
+  for (const k of ['patient_name','patient_id','hospital_name','business_no','address','phone','representative']) $('f_' + k).value = extracted[k] || '';
+  $('f_period').value = computePeriod();
+  const tb = $('rowsTable').querySelector('tbody');
+  tb.innerHTML = '';
+  extracted.rows.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i + 1}</td>`
+      + `<td contenteditable data-k="date">${r.date}</td>`
+      + NUM_KEYS.map(k => `<td contenteditable data-k="${k}">${r[k].toLocaleString()}</td>`).join('')
+      + `<td contenteditable data-k="note">${r.note}</td>`
+      + `<td><button class="gray" onclick="delRow(${i})">삭제</button></td>`;
+    tr.querySelectorAll('[contenteditable]').forEach(td => {
+      td.addEventListener('blur', () => {
+        const k = td.dataset.k, v = td.textContent.trim();
+        extracted.rows[i][k] = NUM_KEYS.includes(k) ? (Number(v.replace(/[^\d.-]/g, '')) || 0) : v;
+        if (k === 'date') $('f_period').value = computePeriod();
+      });
+    });
+    tb.appendChild(tr);
+  });
+  $('resultCard').style.display = 'block';
+  $('resultCard').scrollIntoView({ behavior: 'smooth' });
+}
+function delRow(i) { extracted.rows.splice(i, 1); renderPreview(); }
+$('addRowBtn').addEventListener('click', () => { extracted.rows.push({ date: '', total: 0, copay: 0, insurer: 0, full_self: 0, uninsured: 0, patient_pay: 0, note: '' }); renderPreview(); });
+
+// ===== 엑셀 생성 =====
+$('downloadBtn').addEventListener('click', () => {
+  const g = id => $(id).value.trim();
+  const rows = extracted.rows;
+  const aoa = [
+    ['진료비 내역서 (실손의료보험 청구용)'],
+    [],
+    ['환자 성명', g('f_patient_name'), null, null, '환자등록번호', g('f_patient_id')],
+    ['의료기관', g('f_hospital_name'), null, null, '사업자등록번호', g('f_business_no')],
+    ['소재지', g('f_address'), null, null, '전화번호', g('f_phone')],
+    ['진료기간', g('f_period') || computePeriod(), null, null, '대표자', g('f_representative')],
+    [],
+    ['No.', '진료일자', '진료비 총액(원)', '본인부담금(급여)', '공단부담금', '전액본인부담', '비급여', '환자부담 총액(카드결제)', '비고'],
+  ];
+  rows.forEach((r, i) => aoa.push([i + 1, r.date, r.total, r.copay, r.insurer, r.full_self, r.uninsured, r.patient_pay, r.note]));
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const first = 9, last = 8 + rows.length, sumRow = last + 1;
+  XLSX.utils.sheet_add_aoa(ws, [[null, '합계']], { origin: `A${sumRow}` });
+  ['C','D','E','F','G','H'].forEach(col => {
+    ws[`${col}${sumRow}`] = { t: 'n', f: `SUM(${col}${first}:${col}${last})` };
+  });
+  ws['!ref'] = `A1:I${sumRow}`;
+  ws['!merges'] = [
+    XLSX.utils.decode_range('A1:I1'),
+    ...[3,4,5,6].flatMap(r => [XLSX.utils.decode_range(`B${r}:D${r}`), XLSX.utils.decode_range(`F${r}:I${r}`)])
+  ];
+  ws['!cols'] = [{wch:5},{wch:12},{wch:14},{wch:15},{wch:13},{wch:13},{wch:12},{wch:20},{wch:24}];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '진료비내역');
+  const d = new Date(), ymd = `${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  XLSX.writeFile(wb, `진료비 내역서_${ymd}.xlsx`);
+});
+</script>
+</body>
+</html>
