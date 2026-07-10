@@ -144,25 +144,31 @@ async function pdfToDataUrls(file, onPage) {
 // ===== 무료 AI 인식 (허깅페이스 공개 Space, 키 불필요) =====
 const AI_BASE = 'https://prithivmlmods-multimodal-ocr.hf.space/gradio_api/call/run_ocr';
 const AI_MODEL = 'Nanonets-OCR2-3B';
-const AI_PROMPT = `이 이미지는 한국 병원의 진료비 영수증 또는 진료비 내역서입니다. 아래 JSON 형식으로만 응답하세요 (설명 없이 JSON만).
+const AI_PROMPT = `이 이미지는 한국 병원의 진료비 계산서·영수증입니다 (국민건강보험 요양급여 표준 서식일 수 있음).
+서식 안내:
+- 진료일은 "진료기간" 칸의 첫 날짜(YYYYMMDD 형태)입니다. 문서 상단·하단의 서식 개정일(예: "개정 2024.7.18")이나 발행일은 진료일이 아니므로 절대 사용하지 마세요.
+- 의료기관 이름은 "상호" 칸의 값입니다 (예: ○○의원, ○○한의원). "진료비 계산서" 같은 문서 제목을 의료기관명으로 쓰지 마세요.
+- "합계" 행의 번호: ①=본인부담금(급여), ②=공단부담금, ③=전액본인부담, ④=비급여
+- ⑥=진료비 총액, ⑪=납부할 금액(환자가 실제 낸 돈, 카드결제액)
+아래 JSON 형식으로만 응답하세요 (설명 없이 JSON만).
 {
  "patient_name": "환자 성명",
  "patient_id": "환자등록번호(차트번호)",
- "hospital_name": "의료기관 명칭",
+ "hospital_name": "상호(의료기관 명칭)",
  "business_no": "사업자등록번호",
- "address": "의료기관 소재지",
+ "address": "사업장 소재지",
  "phone": "전화번호",
  "representative": "대표자 성명",
  "rows": [
-  {"date": "YYYY-MM-DD", "total": 진료비총액, "copay": 본인부담금_급여, "insurer": 공단부담금, "full_self": 전액본인부담, "uninsured": 비급여, "patient_pay": 환자가_실제_납부한_금액, "note": "특이사항(없으면 빈문자열)"}
+  {"date": "YYYY-MM-DD(진료일)", "total": 진료비총액⑥, "copay": 본인부담금①, "insurer": 공단부담금②, "full_self": 전액본인부담③, "uninsured": 비급여④, "patient_pay": 납부할금액⑪, "note": "특이사항(없으면 빈문자열)"}
  ]
 }
-규칙: 금액은 숫자만(쉼표 제외), 없는 항목은 0 또는 "". 진료일이 여러 날이면 rows에 날짜별로 추가. 의미가 같은 항목을 위 스키마에 매핑 (예: "납부한 금액"→patient_pay).`;
+규칙: 금액은 숫자만(쉼표 제외), 없는 항목은 0 또는 "". 진료일이 여러 날이면 rows에 날짜별로 추가.`;
 
 async function callFreeAI(imageDataUrl) {
   const post = await fetch(AI_BASE, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data: [AI_MODEL, AI_PROMPT, imageDataUrl, 2048, 0.1, 1.0, 50, 1.0, 60] })
+    body: JSON.stringify({ data: [AI_MODEL, AI_PROMPT, imageDataUrl, 2048, 0.1, 1.0, 50, 1.0, 30] })
   });
   if (!post.ok) throw new Error(`AI 서버 오류 ${post.status}`);
   const { event_id } = await post.json();
@@ -181,7 +187,11 @@ async function callFreeAI(imageDataUrl) {
   if (isError) throw new Error('무료 AI 사용량 한도 또는 서버 오류입니다. 잠시 후 다시 시도하세요.' + (lastData && lastData !== 'null' ? ` (${String(lastData).slice(0,120)})` : ''));
   if (!lastData) throw new Error('AI 응답이 비어 있습니다.');
   const arr = JSON.parse(lastData);
-  return String(arr[0] || '');
+  const out = String(arr[0] || '');
+  if (/^\[?ERROR\]?/i.test(out.trim()) || /ZeroGPU quota/i.test(out)) {
+    throw new Error('무료 AI 사용량 한도에 도달했습니다. 몇 분 후 다시 시도하세요.');
+  }
+  return out;
 }
 
 // AI 응답 → 구조화 (JSON 우선, 실패 시 규칙 기반 파서로 대체)
