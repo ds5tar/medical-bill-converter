@@ -1,4 +1,4 @@
-<!-- 진료비 내역서(사진/PDF)를 무료 OCR(Tesseract)로 인식해 표준 양식 엑셀로 변환하는 단일 파일 웹앱 -->
+<!-- 진료비 내역서(사진/PDF)를 무료 AI(허깅페이스 공개 모델, 키 불필요)로 인식해 표준 양식 엑셀로 변환하는 단일 파일 웹앱 -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -7,7 +7,6 @@
 <title>진료비 내역서 변환기</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; background: #f5f6f8; color: #222; }
@@ -37,7 +36,7 @@
 </head>
 <body>
 <h1>🏥 진료비 내역서 변환기</h1>
-<p class="hint">병원 영수증·진료비 내역 사진(JPG/PNG) 또는 PDF를 업로드하면 브라우저 내장 무료 OCR(문자인식)이 내용을 읽어 실손보험 청구용 엑셀 파일로 변환합니다. 모든 처리가 내 컴퓨터 안에서만 이루어지며, 파일이 외부로 전송되지 않고 비용도 들지 않습니다.</p>
+<p class="hint">병원 영수증·진료비 내역 사진(JPG/PNG) 또는 PDF를 업로드하면 무료 AI(허깅페이스 공개 모델)가 내용을 인식해 실손보험 청구용 엑셀 파일로 변환합니다. 가입·API 키·비용이 필요 없습니다. 인식을 위해 이미지가 허깅페이스(Hugging Face) 무료 AI 서버로 전송됩니다.</p>
 
 <div class="card">
   <h2>1. 파일 업로드</h2>
@@ -45,13 +44,13 @@
   <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,application/pdf" multiple hidden>
   <ul id="fileList"></ul>
   <div class="row" style="margin-top:10px">
-    <button id="analyzeBtn" disabled>🔍 인식 시작</button>
+    <button id="analyzeBtn" disabled>🔍 AI 인식 시작</button>
     <button id="clearBtn" class="gray">초기화</button>
   </div>
   <progress id="prog" value="0" max="100" style="display:none"></progress>
   <div id="status"></div>
   <div id="errors" class="err"></div>
-  <p class="hint">처음 실행 시 한국어 인식 데이터를 내려받느라 수십 초 걸릴 수 있습니다. 페이지당 인식에 5~15초 정도 소요됩니다. 무료 문자인식 특성상 흐린 스캔본은 오인식이 있을 수 있으니 결과 표에서 꼭 확인·수정해주세요.</p>
+  <p class="hint">페이지당 인식에 10~30초 정도 소요됩니다. 무료 AI 서버 사정에 따라 대기가 생기거나 사용량 한도(시간당)에 걸릴 수 있으며, 한도에 걸리면 잠시 후 다시 시도하면 됩니다. 결과는 표에서 꼭 확인·수정해주세요.</p>
 </div>
 
 <div class="card" id="resultCard" style="display:none">
@@ -107,7 +106,7 @@ function renderFileList() {
 }
 
 // ===== 이미지 준비 (리사이즈 + dataURL) =====
-const MAX_DIM = 2200; // OCR은 해상도가 높을수록 정확
+const MAX_DIM = 1600;
 function scaleDim(w, h) { const s = Math.min(1, MAX_DIM / Math.max(w, h)); return [Math.round(w*s), Math.round(h*s)]; }
 
 async function imageFileToDataUrl(file) {
@@ -118,9 +117,11 @@ async function imageFileToDataUrl(file) {
   });
   const [w, h] = scaleDim(img.naturalWidth, img.naturalHeight);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
-  c.getContext('2d').drawImage(img, 0, 0, w, h);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
   URL.revokeObjectURL(img.src);
-  return c.toDataURL('image/png');
+  return c.toDataURL('image/jpeg', 0.85);
 }
 
 async function pdfToDataUrls(file, onPage) {
@@ -134,13 +135,78 @@ async function pdfToDataUrls(file, onPage) {
     const vp = page.getViewport({ scale });
     const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
     await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-    out.push(c.toDataURL('image/png'));
+    out.push(c.toDataURL('image/jpeg', 0.85));
     onPage && onPage(p, pdf.numPages);
   }
   return out;
 }
 
-// ===== OCR 텍스트 파서 (규칙 기반) =====
+// ===== 무료 AI 인식 (허깅페이스 공개 Space, 키 불필요) =====
+const AI_BASE = 'https://prithivmlmods-multimodal-ocr.hf.space/gradio_api/call/run_ocr';
+const AI_MODEL = 'Nanonets-OCR2-3B';
+const AI_PROMPT = `이 이미지는 한국 병원의 진료비 영수증 또는 진료비 내역서입니다. 아래 JSON 형식으로만 응답하세요 (설명 없이 JSON만).
+{
+ "patient_name": "환자 성명",
+ "patient_id": "환자등록번호(차트번호)",
+ "hospital_name": "의료기관 명칭",
+ "business_no": "사업자등록번호",
+ "address": "의료기관 소재지",
+ "phone": "전화번호",
+ "representative": "대표자 성명",
+ "rows": [
+  {"date": "YYYY-MM-DD", "total": 진료비총액, "copay": 본인부담금_급여, "insurer": 공단부담금, "full_self": 전액본인부담, "uninsured": 비급여, "patient_pay": 환자가_실제_납부한_금액, "note": "특이사항(없으면 빈문자열)"}
+ ]
+}
+규칙: 금액은 숫자만(쉼표 제외), 없는 항목은 0 또는 "". 진료일이 여러 날이면 rows에 날짜별로 추가. 의미가 같은 항목을 위 스키마에 매핑 (예: "납부한 금액"→patient_pay).`;
+
+async function callFreeAI(imageDataUrl) {
+  const post = await fetch(AI_BASE, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: [AI_MODEL, AI_PROMPT, imageDataUrl, 2048, 0.1, 1.0, 50, 1.0, 60] })
+  });
+  if (!post.ok) throw new Error(`AI 서버 오류 ${post.status}`);
+  const { event_id } = await post.json();
+  if (!event_id) throw new Error('AI 서버 응답 오류 (event_id 없음)');
+  const res = await fetch(`${AI_BASE}/${event_id}`);
+  const raw = await res.text();
+  // SSE에서 마지막 complete/error 이벤트 추출
+  const events = raw.split('\n\n').filter(Boolean);
+  let lastData = null, isError = false;
+  for (const ev of events) {
+    const type = (ev.match(/^event:\s*(\w+)/m) || [])[1];
+    const dataLine = (ev.match(/^data:\s*(.+)$/m) || [])[1];
+    if (type === 'error') { isError = true; lastData = dataLine; }
+    else if (dataLine) lastData = dataLine;
+  }
+  if (isError) throw new Error('무료 AI 사용량 한도 또는 서버 오류입니다. 잠시 후 다시 시도하세요.' + (lastData && lastData !== 'null' ? ` (${String(lastData).slice(0,120)})` : ''));
+  if (!lastData) throw new Error('AI 응답이 비어 있습니다.');
+  const arr = JSON.parse(lastData);
+  return String(arr[0] || '');
+}
+
+// AI 응답 → 구조화 (JSON 우선, 실패 시 규칙 기반 파서로 대체)
+function parseModelOutput(text) {
+  const m = text.replace(/```json?/gi, '').replace(/```/g, '').match(/\{[\s\S]*\}/);
+  if (m) {
+    try {
+      const j = JSON.parse(m[0]);
+      const info = {};
+      for (const k of ['patient_name','patient_id','hospital_name','business_no','address','phone','representative']) {
+        if (j[k]) info[k] = String(j[k]);
+      }
+      const rows = (Array.isArray(j.rows) ? j.rows : []).map(r => {
+        const row = { date: String(r.date || ''), note: String(r.note || '') };
+        for (const k of NUM_KEYS) row[k] = Number(String(r[k]).replace(/[^\d.-]/g, '')) || 0;
+        return row;
+      });
+      return { info, rows };
+    } catch (e) { /* JSON 파싱 실패 → 규칙 기반으로 */ }
+  }
+  const p = parsePage(text);
+  return { info: p.info, rows: [p.row] };
+}
+
+// ===== OCR 텍스트 파서 (규칙 기반 — AI가 JSON을 못 만들 때의 대체용) =====
 const num = s => Number(String(s).replace(/[^\d]/g, '')) || 0;
 const lastAmount = line => {
   const m = line.match(/\d[\d,\.]{2,}/g);           // 3자리 이상 숫자(쉼표 포함)
@@ -199,9 +265,10 @@ function parsePage(text) {
 function mergePages(pages) {
   const out = { patient_name:'', patient_id:'', hospital_name:'', business_no:'', address:'', phone:'', representative:'', rows: [] };
   const seen = new Set();
-  for (const { info, row } of pages) {
+  for (const { info, rows } of pages) {
     for (const k of Object.keys(out)) if (k !== 'rows' && !out[k] && info[k]) out[k] = info[k];
-    if (row.date || row.total || row.patient_pay) {   // 완전 빈 페이지 제외
+    for (const row of rows) {
+      if (!row.date && !row.total && !row.patient_pay) continue; // 완전 빈 행 제외
       const key = `${row.date}|${row.total}|${row.patient_pay}`;
       if (!seen.has(key)) { seen.add(key); out.rows.push(row); }
     }
@@ -216,7 +283,6 @@ $('analyzeBtn').addEventListener('click', async () => {
   $('errors').textContent = '';
   $('prog').style.display = 'block'; $('prog').value = 0;
   const status = t => $('status').textContent = t;
-  let worker = null;
 
   try {
     // 1) 모든 파일 → 이미지
@@ -232,18 +298,16 @@ $('analyzeBtn').addEventListener('click', async () => {
     }
     if (images.length === 0) throw new Error('변환할 이미지가 없습니다.');
 
-    // 2) OCR (한국어+영어, 최초 1회 언어데이터 다운로드)
-    status('문자인식 엔진 준비 중... (처음이면 데이터 다운로드로 수십 초 소요)');
-    worker = await Tesseract.createWorker('kor+eng');
+    // 2) 무료 AI 인식 (페이지별 순차 호출)
     const pages = [], failed = [];
     for (let i = 0; i < images.length; i++) {
-      status(`문자인식 중... (${i + 1}/${images.length} 페이지)`);
+      status(`AI 인식 중... (${i + 1}/${images.length} 페이지)`);
       $('prog').value = 15 + ((i + 1) / images.length) * 80;
       try {
-        const { data: { text } } = await worker.recognize(images[i]);
-        pages.push(parsePage(text));
-      } catch (e) {
-        failed.push(`페이지 ${i + 1}: ${e.message}`);
+        pages.push(parseModelOutput(await callFreeAI(images[i])));
+      } catch (e1) {
+        try { pages.push(parseModelOutput(await callFreeAI(images[i]))); } // 1회 재시도
+        catch (e2) { failed.push(`페이지 ${i + 1}: ${e2.message}`); }
       }
     }
     if (pages.length === 0) throw new Error('모든 페이지 인식에 실패했습니다.\n' + failed.join('\n'));
@@ -258,7 +322,6 @@ $('analyzeBtn').addEventListener('click', async () => {
     $('errors').textContent = e.message;
     status('실패');
   } finally {
-    if (worker) await worker.terminate();
     $('analyzeBtn').disabled = false;
   }
 });
